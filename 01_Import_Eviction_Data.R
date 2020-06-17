@@ -85,5 +85,6 @@ master_clean_temp5$date_ex_fmt <- as.Date(master_clean_temp5$date_trim, format =
 
 master_raw_cleaned <- master_clean_temp5
 
+#Save dataset
 save(master_raw_cleaned, file = "master_raw_cleaned.RData")
 

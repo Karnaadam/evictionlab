@@ -14,7 +14,7 @@ master_raw_cleaned <- master_raw_cleaned[master_raw_cleaned$Type_of_Action == "E
 master_raw_cleaned <- master_raw_cleaned[!is.na(master_raw_cleaned$STATE),]
 
 
-#Create metric for eviction proection
+#Create metric for eviction protection. 
 master_raw_cleaned$pt_Evic_indirect_civil[master_raw_cleaned$Evic_indirect_civil == "Y"] <- .5
 master_raw_cleaned$pt_Direct_Evic_App[master_raw_cleaned$Direct_Evic_App == "Y"] <- 1
 master_raw_cleaned$All_five_stages_check[master_raw_cleaned$All_five_stages == "Y"] <- 5

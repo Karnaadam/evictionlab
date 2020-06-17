@@ -44,7 +44,7 @@ master_clean_temp2$lag_value_2 <- as.Date(master_clean_temp2$lag_value, origin =
 master_clean_temp2$ID <- seq.int(nrow(master_clean_temp2))
 master_clean_temp2$date_mod <- gsub("/", "", master_clean_temp2$Expiration_Date)
 
-#For effective dates with actual date values, test if they run past current date. 
+#For expiration dates with actual date values, test if they run past current date. 
 subset_w_dates <- master_clean_temp2[!is.na(master_clean_temp2$date_ex_fmt),]
 
 currentdate <- Sys.Date()
@@ -57,7 +57,14 @@ subset_w_dates$new_ex_date[subset_w_dates$thru_today == TRUE] <- currentdate
 subset_w_dates$new_ex_date[subset_w_dates$thru_today == FALSE] <- subset_w_dates$date_ex_fmt[subset_w_dates$thru_today == FALSE] 
 subset_w_dates$new_ex_date <- as.Date(subset_w_dates$new_ex_date, origin = "1970-01-01")
 
-#For effective dates with values other than just a date, follow methodology rules. 
+#For effective dates with values other than just a date, follow these methodology rules:
+#If an order has an expiration date that is ambiguous (i.e. "open") and the expired/replaced date is marked Y or Partial, 
+#assume that newer order has been implemented to replace it. Therefore, change the expiration date to be the start date of the 
+#newer order. If there is not a more recent order by the same source, flag the order for further review. 
+#If an order has an expiration date that is ambiguous (i.e. "open") and the expired/replaced date is marked N, assume the order 
+#is still in effect. 
+#If an order has an expiration date that is ambiguous (i.e. "open") and the expired/replaced date is marked N/A, drop the row. 
+
 subset_amb_dates <- master_clean_temp2[is.na(master_clean_temp2$date_ex_fmt),]
 
 #Drop rows where the expired_replaced information is missing. 
@@ -70,7 +77,6 @@ subset_amb_dates2$new_ex_date <- as.Date(subset_amb_dates2$new_ex_date, origin =
 
 #When an order is listed as not yet expired, set the expired date as today's date. 
 subset_amb_dates2$new_ex_date[subset_amb_dates2$Expired_Replaced == "N"] <- currentdate
-
 
 #Merge back on subset datasets to master to have a complete list of new_ex_date. 
 
@@ -98,6 +104,7 @@ master_clean_temp4$ex_min <- as.Date(master_clean_temp4$ex_min, origin = "1970-0
 #Calculate days between the effective date and expiration date for each order. 
 master_clean_temp4$days_btwn <- master_clean_temp4$ex_min - master_clean_temp4$date_eff_fmt
 
+#Subset variables to use in analysis. 
 master_sub <- sqldf("Select state_mod,
                             Source_of_Action, 
                             Name_of_Source,
@@ -109,6 +116,7 @@ master_sub <- sqldf("Select state_mod,
                           from master_clean_temp4
                      order by group_id, state_mod, date_eff_fmt")
 
+#Group data so that each row is a single source in a single state (i.e. California Governor orders)
 state_sum1 <- sqldf("Select state_mod,
                             Source_of_Action, 
                             Name_of_Source,
@@ -117,19 +125,24 @@ state_sum1 <- sqldf("Select state_mod,
                             count(Source_of_Action) as counts,
                             min(date_eff_fmt) as day_first_action, 
                             max(new_ex_date) as action_thru_date, 
-                            sum(days_btwn) as total_days_of_action
-                          from master_clean_temp4
+                            sum(days) as total_days_of_action
+                          from master_sub
                           group by group_id
                           order by group_id, state_mod, Source_of_Action")
 
+#Reformat date variables
 state_sum1$day_first_action <- as.Date(state_sum1$day_first_action, origin = "1970-01-01")
-
 state_sum1$action_thru_date <- as.Date(state_sum1$action_thru_date, origin = "1970-01-01")
 
+#Calculate the total number of days an order could be active in a state based on the first day it was effective and the last day
+#it was confirmed as active. 
 state_sum1$action_range <- as.numeric(state_sum1$action_thru_date - state_sum1$day_first_action)
 
+#Check whether the total number of days an order is actually active is not greater than the total days it was possible for it 
+#to be active. 
 state_sum1$test <- as.numeric(state_sum1$total_days_of_action - state_sum1$action_range)
 
+#Calculate certain maximums by state. 
 state_sum2 <- sqldf("Select state_mod,
                             max(action_range) as range_max, 
                             max(counts) as counts_max, 
@@ -139,6 +152,8 @@ state_sum2 <- sqldf("Select state_mod,
                           group by state_mod
                           order by state_mod")
 
+#Merge the state maximum values back onto the state-source dataset to be able to identify which source is responsible for 
+#which maxmiums. 
 state_sum3 <-  sqldf("Select A.*,
                             B.range_max, 
                             B.counts_max, 
@@ -148,6 +163,7 @@ state_sum3 <-  sqldf("Select A.*,
                           left join state_sum2 as B
                           on A.state_mod = B.state_mod")
 
+#Format date var. 
 state_sum3$first_to_act_date <- as.Date(state_sum3$first_to_act_date, origin = "1970-01-01")
 
 #Create flag for whether source represents the maximum range of coverage for a state. 
@@ -162,8 +178,7 @@ state_sum3$source_filter_consec_days[state_sum3$total_days_of_action == state_su
 #Create flag for whether source was the first to act in the state. 
 state_sum3$first_to_act_date_filter[state_sum3$day_first_action == state_sum3$first_to_act_date] <- 1
 
-
+#Save dataset.
 state_sum_gen_orders <- state_sum3
-
 save(state_sum_gen_orders, file = "state_sum_gen_orders.RData")
 
